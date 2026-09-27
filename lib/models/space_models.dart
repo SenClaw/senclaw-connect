@@ -1,0 +1,230 @@
+// Models mirroring `/api/space/*` JSON shapes (src/gateway/ui_server/space.rs).
+// Notes and events list endpoints return *bare JSON arrays* (not wrapped).
+
+class SpaceNote {
+  final String id;
+  final String title;
+  final String body;
+  final List<String> tags;
+  final String? folderId;
+  final bool pinned;
+  final int createdAt;
+  final int updatedAt;
+
+  const SpaceNote({
+    required this.id,
+    required this.title,
+    required this.body,
+    this.tags = const [],
+    this.folderId,
+    this.pinned = false,
+    this.createdAt = 0,
+    this.updatedAt = 0,
+  });
+
+  factory SpaceNote.fromJson(Map<String, dynamic> j) => SpaceNote(
+    id: (j['id'] ?? '').toString(),
+    title: (j['title'] ?? '').toString(),
+    body: (j['body'] ?? '').toString(),
+    tags: ((j['tags'] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList(),
+    folderId: j['folder_id'] as String?,
+    pinned: j['pinned'] as bool? ?? false,
+    createdAt: (j['created_at'] as num?)?.toInt() ?? 0,
+    updatedAt: (j['updated_at'] as num?)?.toInt() ?? 0,
+  );
+}
+
+class SpaceEvent {
+  final String id;
+  final String title;
+  final String? description;
+  final int startAt; // epoch ms
+  final int endAt; // epoch ms
+  final bool allDay;
+  final String? location;
+  final String? color;
+  final int? reminderMin;
+  final String source;
+  final String status;
+  final int? renotifyMin;
+
+  const SpaceEvent({
+    required this.id,
+    required this.title,
+    this.description,
+    required this.startAt,
+    required this.endAt,
+    this.allDay = false,
+    this.location,
+    this.color,
+    this.reminderMin,
+    this.source = '',
+    this.status = 'upcoming',
+    this.renotifyMin,
+  });
+
+  factory SpaceEvent.fromJson(Map<String, dynamic> j) => SpaceEvent(
+    id: (j['id'] ?? '').toString(),
+    title: (j['title'] ?? '').toString(),
+    description: j['description'] as String?,
+    startAt: (j['start_at'] as num?)?.toInt() ?? 0,
+    endAt: (j['end_at'] as num?)?.toInt() ?? 0,
+    allDay: j['all_day'] as bool? ?? false,
+    location: j['location'] as String?,
+    color: j['color'] as String?,
+    reminderMin: (j['reminder_min'] as num?)?.toInt(),
+    source: (j['source'] ?? '').toString(),
+    status: (j['status'] ?? 'upcoming').toString(),
+    renotifyMin: (j['renotify_min'] as num?)?.toInt(),
+  );
+
+  DateTime get start => DateTime.fromMillisecondsSinceEpoch(startAt);
+  DateTime get end => DateTime.fromMillisecondsSinceEpoch(endAt);
+}
+
+class SpaceEmailAccount {
+  final String id;
+  final String label;
+  final String email;
+
+  const SpaceEmailAccount({
+    required this.id,
+    required this.label,
+    required this.email,
+  });
+
+  factory SpaceEmailAccount.fromJson(Map<String, dynamic> j) =>
+      SpaceEmailAccount(
+        id: (j['id'] ?? '').toString(),
+        label: (j['label'] ?? '').toString(),
+        email: (j['email'] ?? '').toString(),
+      );
+}
+
+class SpaceEmail {
+  final String id;
+  final String accountId;
+  final String? subject;
+  final String? from;
+  final int? date; // epoch ms
+  final String flags;
+  // detail-only
+  final String? to;
+  final String? bodyText;
+
+  const SpaceEmail({
+    required this.id,
+    required this.accountId,
+    this.subject,
+    this.from,
+    this.date,
+    this.flags = '',
+    this.to,
+    this.bodyText,
+  });
+
+  bool get unread => !flags.toLowerCase().contains('seen');
+
+  factory SpaceEmail.fromJson(Map<String, dynamic> j) => SpaceEmail(
+    id: (j['id'] ?? '').toString(),
+    accountId: (j['account_id'] ?? '').toString(),
+    subject: j['subject'] as String?,
+    from: j['from'] as String?,
+    date: (j['date'] as num?)?.toInt(),
+    flags: (j['flags'] ?? '').toString(),
+    to: j['to'] as String?,
+    bodyText: j['body_text'] as String?,
+  );
+}
+
+/// A scheduled task (cron/interval/once). The Rust `ScheduledTask` struct has
+/// NO serde rename, so keys are snake_case.
+class SpaceSchedule {
+  final String id;
+  final String groupFolder;
+  final String prompt;
+  final String scheduleType; // 'cron' | 'interval' | 'once'
+  final String scheduleValue;
+  final String status;
+  final String? nextRun;
+  final String? lastRun;
+
+  const SpaceSchedule({
+    required this.id,
+    required this.groupFolder,
+    required this.prompt,
+    required this.scheduleType,
+    required this.scheduleValue,
+    required this.status,
+    this.nextRun,
+    this.lastRun,
+  });
+
+  factory SpaceSchedule.fromJson(Map<String, dynamic> j) => SpaceSchedule(
+    id: (j['id'] ?? '').toString(),
+    groupFolder: (j['group_folder'] ?? '').toString(),
+    prompt: (j['prompt'] ?? '').toString(),
+    scheduleType: (j['schedule_type'] ?? '').toString(),
+    scheduleValue: (j['schedule_value'] ?? '').toString(),
+    status: (j['status'] ?? '').toString(),
+    nextRun: j['next_run'] as String?,
+    lastRun: j['last_run'] as String?,
+  );
+}
+
+/// A Space App (`/api/space/apps`). `manifest` is freeform JSON; the useful
+/// display fields (name/description/icon) live inside it.
+class SpaceApp {
+  final String id;
+  final bool enabled;
+  final Map<String, dynamic> manifest;
+
+  /// Registration timestamp (ms) — bumped on every (re)deploy, so it doubles
+  /// as the version key for the local asset cache.
+  final int installedAt;
+
+  const SpaceApp(
+      {required this.id,
+      this.enabled = true,
+      this.manifest = const {},
+      this.installedAt = 0});
+
+  String get name =>
+      (manifest['name'] ?? manifest['title'] ?? id).toString();
+  String get description => (manifest['description'] ?? '').toString();
+  String get icon => (manifest['icon'] ?? '🧩').toString();
+
+  factory SpaceApp.fromJson(Map<String, dynamic> j) => SpaceApp(
+        id: (j['id'] ?? '').toString(),
+        enabled: j['enabled'] as bool? ?? true,
+        manifest: j['manifest'] is Map
+            ? (j['manifest'] as Map).cast<String, dynamic>()
+            : const {},
+        installedAt: (j['installed_at'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Hub update status for one installed Space App
+/// (`GET /api/space/apps/updates`, camelCase).
+class AppUpdateStatus {
+  final String id;
+  final String? installed;
+  final String? latest;
+  final bool hasUpdate;
+
+  const AppUpdateStatus({
+    required this.id,
+    this.installed,
+    this.latest,
+    this.hasUpdate = false,
+  });
+
+  factory AppUpdateStatus.fromJson(Map<String, dynamic> j) => AppUpdateStatus(
+        id: (j['id'] ?? '').toString(),
+        installed: j['installed'] as String?,
+        latest: j['latest'] as String?,
+        hasUpdate: j['hasUpdate'] as bool? ?? false,
+      );
+}

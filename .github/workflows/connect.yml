@@ -1,0 +1,198 @@
+name: Connect build
+
+# SenClaw Connect is a Flutter client. It does not bundle the daemon, so this
+# workflow never checks out a sibling repo. Android release builds are signed
+# with the debug keystore (see android/app/build.gradle.kts) until a release
+# keystore is wired in. The iOS artifact is an unsigned Runner.app — it proves
+# the tree compiles; installing on a device still needs a signing identity.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "lib/**"
+      - "android/**"
+      - "ios/**"
+      - "macos/**"
+      - "assets/**"
+      - "test/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "analysis_options.yaml"
+      - ".github/workflows/connect.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "lib/**"
+      - "android/**"
+      - "ios/**"
+      - "macos/**"
+      - "assets/**"
+      - "test/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "analysis_options.yaml"
+      - ".github/workflows/connect.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FLUTTER_VERSION: "3.41.6"
+
+jobs:
+  check:
+    name: Flutter analyze + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Flutter analyze + test
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! { flutter pub get && flutter analyze && flutter test; } 2>&1 | tee /tmp/flutter.log; then
+            tail -n 9 /tmp/flutter.log \
+              | while IFS= read -r line; do echo "::error title=flutter::${line}"; done
+            exit 1
+          fi
+
+  android:
+    name: Build Android APK
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # gradle.properties asks for an 8G daemon heap, which crowds a hosted
+      # runner out of memory once Kotlin and the NDK are also up.
+      - name: Cap Gradle heap for CI
+        run: |
+          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx2G -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=256m/' android/gradle.properties
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(build apk --release)
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+            ver="${ver%%-*}"
+            args+=(--build-name "$ver" --build-number "${GITHUB_RUN_NUMBER}")
+          fi
+          flutter "${args[@]}"
+          cp build/app/outputs/flutter-apk/app-release.apk SenClaw-Connect-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SenClaw-Connect-android
+          path: SenClaw-Connect-android.apk
+
+  apple:
+    name: Build iOS + macOS
+    needs: check
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build unsigned iOS and macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter config --enable-macos-desktop
+          # macOS runners ship bash 3.2, where "${empty[@]}" under set -u errors.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+            ver="${ver%%-*}"
+            flutter build ios --release --no-codesign --build-name "$ver" --build-number "${GITHUB_RUN_NUMBER}"
+            flutter build macos --release --build-name "$ver" --build-number "${GITHUB_RUN_NUMBER}"
+          else
+            flutter build ios --release --no-codesign
+            flutter build macos --release
+          fi
+
+          mkdir -p dist
+          ditto -c -k --keepParent build/ios/iphoneos/Runner.app dist/SenClaw-Connect-ios-unsigned.zip
+          app=$(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$app"
+          ditto -c -k --keepParent "$app" dist/SenClaw-Connect-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SenClaw-Connect-apple
+          path: dist/*
+
+  release:
+    name: Create release
+    needs: [android, apple]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            git log --pretty=format:'- %s' "${PREV}..${TAG}" > RELEASE_NOTES.md
+            printf '\n\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+              "$GITHUB_REPOSITORY" "$PREV" "$TAG" >> RELEASE_NOTES.md
+          else
+            echo "- Initial release" > RELEASE_NOTES.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: SenClaw Connect ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
+          files: release-artifacts/*
