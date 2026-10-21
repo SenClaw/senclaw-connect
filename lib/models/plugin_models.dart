@@ -9,6 +9,10 @@ class LocalSkill {
   final String dir;
   final bool disabled;
 
+  /// Sources this skill replaces: a managed skill with a bundled skill's name
+  /// hides it.
+  final List<String> shadows;
+
   LocalSkill({
     required this.name,
     this.description = '',
@@ -16,6 +20,7 @@ class LocalSkill {
     this.source = '',
     this.dir = '',
     this.disabled = false,
+    this.shadows = const [],
   });
 
   factory LocalSkill.fromJson(Map<String, dynamic> j) => LocalSkill(
@@ -25,6 +30,7 @@ class LocalSkill {
         source: j['source'] as String? ?? '',
         dir: j['dir'] as String? ?? '',
         disabled: j['disabled'] as bool? ?? false,
+        shadows: ((j['shadows'] as List?) ?? const []).map((e) => '$e').toList(),
       );
 }
 

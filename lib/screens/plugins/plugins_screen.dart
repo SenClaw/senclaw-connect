@@ -6,6 +6,8 @@ import '../../services/plugins_api.dart';
 import '../../services/relay_manager.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/states.dart';
+import '../../models/skill_history_models.dart' show shadowedName;
+import 'skill_history_screen.dart';
 
 /// Plugins hub mirroring the web Plugins panels: Skills, Subagents, MCP,
 /// Marketplace, Hooks.
@@ -238,11 +240,38 @@ class _SkillsTabState extends State<_SkillsTab>
                   Text('${s.source}${s.version.isNotEmpty ? ' · v${s.version}' : ''}',
                       style: TextStyle(
                           color: c.textMuted, fontSize: 11)),
+                  if (s.shadows.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                          tr('thay thế ${shadowedName(s.shadows.last)}',
+                              'overrides ${shadowedName(s.shadows.last)}'),
+                          key: ValueKey('skill-shadow-${s.name}'),
+                          style: const TextStyle(
+                              color: AppTokens.warning, fontSize: 11)),
+                    ),
                 ],
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // A Space App's skills change with the app: no history here.
+                  if (!s.source.startsWith('app:'))
+                    IconButton(
+                      key: ValueKey('skill-history-${s.name}'),
+                      tooltip: tr('Lịch sử', 'History'),
+                      icon: Icon(Icons.history, color: c.textMuted, size: 20),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => SkillHistoryScreen(
+                            name: s.name,
+                            source: s.source,
+                            canRollback: s.source == 'clawhub-managed',
+                            onRestored: _load,
+                          ),
+                        ),
+                      ),
+                    ),
                   Switch(
                     value: !s.disabled,
                     onChanged: (_) => _toggle(s),

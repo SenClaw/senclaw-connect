@@ -1,5 +1,6 @@
 import 'dart:convert';
 import '../models/plugin_models.dart';
+import '../models/skill_history_models.dart';
 import 'api_client.dart';
 import 'local_cache.dart';
 
@@ -37,6 +38,45 @@ class PluginsApi {
 
   Future<void> toggleSkill(String name, bool enable) =>
       _api.post('/api/skills/$name/${enable ? 'enable' : 'disable'}');
+
+  // ── Skill history ──────────────────────────────────────────────────────
+  /// Revisions of one skill, newest first, plus the (source, key) the daemon
+  /// resolved the name to — the pair the usage numbers are keyed by.
+  Future<({String source, String key, List<SkillRevision> revisions})>
+      skillHistory(String name, String source) async {
+    final obj = await _api.getObject(ApiClient.withQuery(
+        '/api/skills/${Uri.encodeComponent(name)}/history',
+        {'source': source}));
+    return (
+      source: '${obj['source'] ?? source}',
+      key: '${obj['key'] ?? name}',
+      revisions: jsonMaps(obj['revisions']).map(SkillRevision.fromJson).toList(),
+    );
+  }
+
+  Future<SkillRevision> skillRevision(
+      String name, String id, String source) async {
+    final obj = await _api.getObject(ApiClient.withQuery(
+        '/api/skills/${Uri.encodeComponent(name)}/history/${Uri.encodeComponent(id)}',
+        {'source': source}));
+    return SkillRevision.fromJson(
+        Map<String, dynamic>.from(obj['revision'] as Map));
+  }
+
+  Future<void> rollbackSkill(String name, String id) => _api.post(
+      '/api/skills/${Uri.encodeComponent(name)}/rollback/${Uri.encodeComponent(id)}');
+
+  /// The ledger's per-skill, per-version numbers; optional, so a daemon
+  /// without it (or a failure) just yields none.
+  Future<Map<String, UsageVersion>> skillUsage(
+      String source, String key) async {
+    try {
+      final obj = await _api.getObject('/api/skill-usage/summary?days=30');
+      return usageByHash(obj, source, key);
+    } catch (_) {
+      return const {};
+    }
+  }
 
   // ── Subagents ──────────────────────────────────────────────────────────
   Future<List<Subagent>> listSubagents() async {
